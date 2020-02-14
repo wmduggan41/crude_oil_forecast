@@ -1,0 +1,11 @@
+.navbar-logo {
+    height: 90%;
+    -webkit-filter: drop-shadow(2px 2px 2px #222);
+}
+.navbar-header {
+    height: 60px;
+}
+
+#section-controls {
+    background-color: #f3f3f3;
+}

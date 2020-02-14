@@ -1,0 +1,262 @@
+---
+title: "Shiny Crude Oil Forecast App"
+output: 
+  flexdashboard::flex_dashboard:
+    logo: 'https://www.business-science.io/img/business-science-logo.png'
+    orientation: columns
+    vertical_layout: fill
+    css: ['www/mytheme.css', 'www/styles.css']
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+# LEARN TO MAKE SHINY APPS AT BUSINESS SCIENCE
+# - APP GALLERY: https://apps.business-science.io/
+
+# Shiny
+library(flexdashboard)
+library(shiny)
+
+# API
+library(Quandl)
+library(config)
+
+# Time Series
+library(lubridate)
+library(tsibble)
+library(fable)
+
+# Visualization
+library(plotly)
+
+# Modeling
+library(recipes)
+library(rsample)
+
+# Core
+library(tidyverse)
+library(tidyquant)
+
+# Params
+start_date <- "2000-01-01"
+end_date   <- today() %>% as.character()
+forecast_horizon <- 3
+
+# Set API Key
+# Quandl.api_key("your_api_key")
+config::get("quandl", file = "../config.yml") %>% Quandl.api_key()
+
+# Helper Functions
+quandl_download <- function(code, 
+                            value_name  = "Value", 
+                            start_date  = "2000-01-01", 
+                            end_date    = lubridate::today(),
+                            order       = "asc",
+                            summary_fun = median) {
+    
+    Quandl(code, start_date = start_date, end_date = end_date, order = "asc") %>%
+        as_tsibble(index = "Date") %>%
+        index_by(year_month = yearmonth(Date)) %>%
+        summarise(!! value_name := summary_fun(Value)) 
+    
+}
+
+# Load Data
+wti_spot_prices_tsbl <- quandl_download("EIA/PET_RWTC_D", start_date = start_date, end_date = end_date, value_name = "price_wti", summary_fun = first)
+
+financial_arca_tsbl <- tq_get("^XOI", from = start_date, to = end_date) %>%
+    as_tsibble(index = "date") %>%
+    select(date, adjusted) %>%
+    index_by(year_month = yearmonth(date)) %>%
+    summarise(Value = first(adjusted)) %>%
+    rename(financial_arca = Value)
+
+stock_us_refineries_tsbl <- quandl_download("EIA/PET_MCRRSUS1_M", value_name = "stock_us_refineries") 
+
+# Join Data
+us_petroleum_joined_m_tsbl <- wti_spot_prices_tsbl %>%
+    # Stock
+    left_join(stock_us_refineries_tsbl) %>%
+    # Financial
+    left_join(financial_arca_tsbl)
+
+
+
+# Compute lags based on forecast horizon
+lag_settings_tbl <- us_petroleum_joined_m_tsbl %>%
+    map_dfr(.f = function(x) {
+        x %>%
+            tail(12) %>%
+            is.na() %>%
+            sum()
+    }) %>%
+    pivot_longer(cols = everything()) %>%
+    mutate(value = value + forecast_horizon) %>%
+    pivot_wider(names_from = "name", values_from = "value")
+
+
+# Preprocess using lag settings
+preprocessing_rec <- recipe(price_wti ~ ., data = us_petroleum_joined_m_tsbl) %>%
+
+    # Center & Scale
+    step_normalize(all_numeric()) %>%
+
+    # Engineered Features
+    step_date(year_month, features = c("decimal")) %>%
+
+    # Add Lagged Features
+    step_lag(price_wti,
+             lag = lag_settings_tbl$price_wti) %>%
+    step_lag(stock_us_refineries,
+             lag = lag_settings_tbl$stock_us_refineries) %>%
+    step_lag(financial_arca,
+             lag = lag_settings_tbl$financial_arca) %>%
+
+    # Remove Features
+    step_rm(stock_us_refineries, financial_arca) %>%
+
+    # Remove rows with NA's
+    step_naomit(all_predictors()) %>%
+    prep()
+
+us_petroleum_prep_m_tsbl <- bake(preprocessing_rec, us_petroleum_joined_m_tsbl) %>%
+    as_tsibble(index = "year_month")
+
+# Get normalization parameters
+normalization_params_tbl <- preprocessing_rec %>%
+    tidy(1) %>%
+    filter(terms == "price_wti") %>%
+    select(statistic, value) %>%
+    pivot_wider(names_from = statistic, values_from = value)
+
+
+# Setup Train/Test
+train_test_splits <- initial_time_split(us_petroleum_prep_m_tsbl, prop = 0.8)
+
+# Calculate NAIVE MAE (Accuracy)
+mae_naive <- train_test_splits %>%
+    testing() %>%
+    as_tibble() %>%
+    select(contains("price_wti")) %>%
+    # Reverse Normalize Transformation
+    mutate_all(.funs = function(x) (x * normalization_params_tbl$sd) + normalization_params_tbl$mean) %>%
+    summarize(mae = mean(abs(.[[1]] - .[[2]])))
+
+# Train ARIMA models
+nms <- names(us_petroleum_prep_m_tsbl)
+
+#fm_1 <- as.formula("price_wti")
+# Include lag of wti
+fm_2 <- as.formula(str_glue("price_wti ~ {nms[4]}"))
+# Include lag of financial arca
+fm_3 <- as.formula(str_glue("price_wti ~ {nms[4]} + {nms[6]}"))
+# Include lag of year_month_decimal
+fm_4 <- as.formula(str_glue("price_wti ~ {nms[4]} + {nms[6]} + {nms[3]}"))
+
+fm_5 <- as.formula(str_glue("price_wti ~ {nms[4]} + {nms[6]} + {nms[3]} + {nms[5]}"))
+
+model_fit <- training(train_test_splits) %>%
+    model(
+        ARIMA(price_wti),
+        ARIMA(fm_2),
+        ARIMA(fm_3),
+        ARIMA(fm_4),
+        ARIMA(fm_5)
+    )
+
+model_fit
+
+predictions_tsbl <- forecast(model_fit, testing(train_test_splits)) 
+
+predictions_tsbl %>%
+    mutate(.model = as_factor(.model)) %>%
+    autoplot(testing(train_test_splits)) +
+    facet_wrap(~.model, ncol = 3) +
+    scale_color_tq() +
+    theme_tq(base_size = 16) +
+    theme(legend.direction = "vertical")
+
+prediction_mae_tbl <- predictions_tsbl %>%
+    as_tibble() %>%
+    select(.model, year_month, price_wti) %>%
+    rename(.pred = price_wti) %>%
+    mutate(.model = as_factor(.model)) %>%
+    
+    # Reverse Normalize Transformation
+    mutate(.pred = (.pred * normalization_params_tbl$sd) + normalization_params_tbl$mean) %>%
+    
+    # Calculate MAE
+    left_join(
+        us_petroleum_joined_m_tsbl %>%
+            as_tibble() %>%
+            select(year_month, price_wti)
+    ) %>%
+    group_by(.model) %>%
+    summarize(
+        mae = mean(abs(price_wti - .pred))
+    )
+
+best_model_tbl <- prediction_mae_tbl %>%
+    filter(mae == min(mae)) %>%
+    mutate(.model = as.character(.model))
+
+# Make future dataset
+new_data_tsbl <- us_petroleum_joined_m_tsbl %>% 
+    append_row(n = forecast_horizon, keep_all = TRUE) %>%
+    bake(preprocessing_rec, .) %>%
+    as_tsibble() %>%
+    tail(forecast_horizon)
+
+predictions_future_tbl <- model_fit %>%
+    select(best_model_tbl$.model) %>%
+    forecast(new_data_tsbl) 
+
+
+
+```
+
+Controls {.sidebar}
+----------
+
+
+
+```{r}
+br()
+div(
+    class = "text-center",
+    sliderInput("forecast_horizon", 
+                label = "Enter Forecast Horizon", 
+                min = 1, max = 6, step = 1, value = 3, width = "100%"),
+    actionButton("button", "Submit", class = "btn-success")
+)
+
+
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Forecast
+
+```{r}
+predictions_future_tbl %>%
+    autoplot(testing(train_test_splits)) +
+    theme_tq() +
+    scale_color_tq()
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Chart B
+
+```{r}
+
+```
+
+### Chart C
+
+```{r}
+
+```
+

@@ -34,8 +34,25 @@ us_petroleum_prep_02_m_tsbl <- bake(preprocess_02_rec, us_petroleum_joined_m_tsb
 
 us_petroleum_prep_02_m_tsbl %>% glimpse()
 
+
 # 9.0 ARIMA MODEL ----
 train_test_splits <- initial_time_split(us_petroleum_prep_02_m_tsbl, prop = 0.8)
+
+# BENCHMARK
+# What is the benchmark?
+# - NAIVE: 1 Month Look-Ahead
+
+train_test_splits %>% 
+    testing() %>%
+    as_tibble() %>%
+    # Reverse Normalize Transformation
+    mutate(
+        price_wti = (price_wti * 26.3) + 61.9,
+        lag_1_price_wti = (lag_1_price_wti * 26.3) + 61.9
+    ) %>%
+    summarize(
+        mae = mean(abs(price_wti - lag_1_price_wti))
+    )
 
 # UNIVARIATE FORECAST ----
 model_01_fit <- training(train_test_splits) %>%
@@ -47,7 +64,9 @@ testing(train_test_splits)
 
 model_01_fit %>% forecast(h = 1)
 
-model_01_fit %>% forecast(h = 10)
+model_01_fit %>% forecast(h = 12)
+
+model_01_fit %>% forecast(h = 12) %>% autoplot(us_petroleum_prep_02_m_tsbl)
 
 # MULTIVARIATE FORECAST ----
 model_02_fit <- training(train_test_splits) %>%
