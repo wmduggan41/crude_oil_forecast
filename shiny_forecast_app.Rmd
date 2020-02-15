@@ -137,17 +137,24 @@ info_card <- function(title, value, sub_value,
 Controls {.sidebar}
 ----------
 
-
-
 ```{r}
 br()
 div(
     class = "text-center",
+    "Forecast the price per barrel of WTI Crude Oil, an important economic indicator for many companies and industries connected to fuel and energy products,",
+    hr(),
     sliderInput("forecast_horizon", 
-                label = "Enter Forecast Horizon", 
+                label = h4("Enter WTI Crude Oil Forecast Horizon"), 
                 min = 1, max = 12, step = 1, 
                 value = initial_forecast_horizon, width = "100%"),
-    actionButton("submit_button", "Submit", class = "btn-success")
+    actionButton("submit_button", "Submit", class = "btn-success"),
+    br(),
+    hr(),
+    "Learn Shiny", 
+    br(),
+    a(href = "https://www.business-science.io/", 
+      class = "btn btn-primary", target="_blank", "Business Science")
+    
 )
 
 # Setup reactive values list
@@ -271,9 +278,6 @@ observeEvent(input$submit_button, {
     rv$best_model_tbl <- best_model_tbl
     
     # Retrain on Full Dataset
-    # final_model_fit <- model_fit %>%
-    #     select(best_model_tbl$.model) %>%
-    #     refit(us_petroleum_prep_m_tsbl)
     final_model_fit <- us_petroleum_prep_m_tsbl %>%
         model(ARIMA(as.formula(best_model_tbl$formula_label)))
     
@@ -312,25 +316,85 @@ Column {data-width=650 .tabset}
 div(
     class = "row",
     div(
-        class = "col-md-3",
-        info_card(title = "Some Title", value = "20%", sub_value = "300",
-                  main_icon = "chart-line", sub_icon = "arrow-up", 
-                  bg_color = "default")
+        class = "col-md-4",
+        uiOutput("card_1")
+    ),
+    div(
+        class = "col-md-4",
+        uiOutput("card_2")
+    ),
+    div(
+        class = "col-md-4",
+        uiOutput("card_3")
     )
 )
 
 div(
     class = "row",
     div(
-        class = "col-md-6",
+        class = "col-sm-12",
         div(
             class = "panel",
-            div(class = "panel-heading", h5("Original Series")),
+            div(class = "panel-heading", h5("Forecast")),
             div(class = "panel-body", plotlyOutput(outputId = "plot_fullseries")) 
         )
     )
     
 )
+
+output$card_1 <- renderUI({
+  
+    req(rv$mae_naive, rv$best_model_tbl)
+    
+    mae_naive <- rv$mae_naive$mae
+    mae_model <- rv$best_model_tbl$mae
+    
+    improvement_percent <- 1 - mae_model / mae_naive 
+  
+    info_card(
+        title = scales::percent(improvement_percent), 
+        value = "Reduction in Forecast Error", 
+        sub_value = str_glue("{round(mae_model, 2)} Model Error vs {round(mae_naive, 2)} Baseline"),
+        main_icon = "chart-line", 
+        sub_icon = ifelse(improvement_percent > 0, "arrow-down", "arrow-up"), 
+        bg_color = "primary", 
+        text_color = "primary", 
+        sub_text_color = ifelse(improvement_percent > 0, "success", "danger"))
+})
+
+output$card_2 <- renderUI({
+  
+    req(rv$best_model_tbl)
+    
+    mae_model <- rv$best_model_tbl$mae
+  
+    info_card(
+        title = scales::dollar(mae_model), 
+        value = "Mean Absolute Error (MAE)", 
+        sub_value = "ARIMA Model",
+        main_icon = "chart-line", 
+        sub_icon = NULL, 
+        bg_color = "primary", 
+        text_color = "primary", 
+        sub_text_color = "success")
+})
+
+output$card_3 <- renderUI({
+  
+    req(rv$mae_naive)
+    
+    mae_naive <- rv$mae_naive$mae
+  
+    info_card(
+        title = scales::dollar(mae_naive), 
+        value = "Mean Absolute Error (MAE)", 
+        sub_value = "Baseline Model",
+        main_icon = "chart-line", 
+        sub_icon = NULL, 
+        bg_color = "primary", 
+        text_color = "primary", 
+        sub_text_color = "warning")
+})
 
 output$plot_fullseries <- renderPlotly({
   
