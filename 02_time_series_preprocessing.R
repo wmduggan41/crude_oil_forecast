@@ -112,7 +112,7 @@ us_petroleum_prep_01_m_tsbl %>% lag_plot("stock") + geom_smooth()
 us_petroleum_prep_01_m_tsbl %>% lag_plot("financial") + geom_smooth()
 
 
-# 8.0 FINAL RECIPE ----
+# 8.0 REFINE RECIPE ----
 preprocess_02_rec <- recipe(price_wti ~ ., data = us_petroleum_joined_m_tsbl) %>%
     
     # Center & Scale - Not Necessary for fable
