@@ -79,8 +79,6 @@ us_petroleum_prep_01_m_tsbl
 
 # 7.0 LAG PLOTS ----
 
-col_match <- "price_wti"
-
 lag_plot <- function(data, col_match) {
     
     us_petroleum_prep_01_m_tsbl %>%
@@ -99,7 +97,7 @@ lag_plot <- function(data, col_match) {
 # WTI Prices - Lag 1
 us_petroleum_prep_01_m_tsbl %>% lag_plot("price_wti") + geom_smooth()
 
-# Demand Featues - Possibly Demand Population?
+# Demand Features - Possibly Demand Population?
 us_petroleum_prep_01_m_tsbl %>% lag_plot("demand") + geom_smooth()
 
 # Supply Features - supply operating capacity?
@@ -108,7 +106,7 @@ us_petroleum_prep_01_m_tsbl %>% lag_plot("supply") + geom_smooth()
 # Stock Features - Stock US Refineries  
 us_petroleum_prep_01_m_tsbl %>% lag_plot("stock") + geom_smooth()
 
-# Financial - ARCA (Oil & Gas Index)
+# Financial Features - ARCA (Oil & Gas Index)
 us_petroleum_prep_01_m_tsbl %>% lag_plot("financial") + geom_smooth()
 
 

@@ -2,7 +2,7 @@
 title: "Shiny Crude Oil Forecast App"
 output: 
   flexdashboard::flex_dashboard:
-    logo: 'https://www.business-science.io/img/business-science-logo.png'
+    logo: 'img/business-science-logo.png'
     orientation: columns
     vertical_layout: fill
     css: ['www/mytheme.css', 'www/styles.css']
@@ -25,6 +25,7 @@ library(config)
 library(lubridate)
 library(tsibble)
 library(fable)
+library(slider)
 
 # Visualization
 library(plotly)
@@ -264,7 +265,16 @@ observeEvent(input$submit_button, {
                 select(year_month, price_wti)
         ) %>%
         group_by(.model) %>%
-        summarize(mae = mean(abs(price_wti - .pred))) %>%
+      
+        mutate(rolling_mae = slide2_dbl(.x = price_wti, 
+                                    .y = .pred, 
+                                    .f = function(x, y) mean(abs(x - y)), 
+                                    .before   = forecast_horizon - 1, 
+                                    .step     = 1, 
+                                    .complete = TRUE)) %>%
+        summarize(
+            mae = mean(rolling_mae, na.rm = TRUE)
+        ) %>%
         mutate(.model = as.character(.model)) %>%
         left_join(formula_key_tbl, by = c(`.model` = "formula_id"))
 
@@ -273,6 +283,7 @@ observeEvent(input$submit_button, {
     # Select Best Model
     best_model_tbl <- prediction_mae_tbl %>%
         filter(mae == min(mae)) %>%
+        slice(1) %>%
         mutate(.model = as.character(.model))
 
     rv$best_model_tbl <- best_model_tbl

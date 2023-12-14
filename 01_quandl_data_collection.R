@@ -22,15 +22,6 @@ library(DataExplorer)
 library(plotly)
 library(ggcorrplot)
 
-# Modeling
-library(recipes)
-library(parsnip)
-library(rsample)
-library(tune)
-library(dials)
-library(yardstick)
-library(keras)
-
 # Core
 library(tidyverse)
 library(tidyquant)
